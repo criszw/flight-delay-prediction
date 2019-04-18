@@ -1,0 +1,224 @@
+---
+title: "Data wrangling"
+output: html_notebook
+---
+
+###**1. Overview of the data set**
+The data set I use is publicly available at the Bureau of Transportation 
+Statistics website, and includes the recordings of all 2015 commercial domestic 
+flights in the United States. The information can be found in  (https://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=236&DB_Short_Name=On-Time)  
+
+First, I will read the file containing data set. In this case I will be using 
+'fread' instead of 'read.csv' for computational reasons due to the large size of
+the file. Fread creates a data table.
+
+```{r, warning= FALSE}
+library(data.table)
+library(knitr)
+flight.data <- fread("/Users/cristinazaldumbide/Desktop/flights.csv", 
+                     stringsAsFactors = FALSE)
+source("summary.info.R")
+summary.info(flight.data)
+```
+
+The data set contains approximately 6 million flights and 31 features stored as 
+either characters or integers. The following are brief descriptions of the variables.
+
+* *YEAR, MONTH, DAY, DAY_OF_WEEK:* dates of the flight   
+* *AIRLINE:* An identification number assigned by US DOT to identify a unique 
+airline   
+* *ORIGIN_AIRPORT and DESTINATION_AIRPORT:* code attributed by IATA to identify 
+the airports   
+* *SCHEDULED_DEPARTURE and SCHEDULED_ARRIVAL:* scheduled times of take-off and 
+landing  
+* *DEPARTURE_TIME and ARRIVAL_TIME:* real times at which take-off and landing took
+place  
+* *DEPARTURE_DELAY and ARRIVAL_DELAY:* difference (in minutes) between planned and 
+real times   
+* *DISTANCE:* distance (in miles) of the flight  
+* *DIVERTED and CANCELLED:* 1 if true, 0 if false  
+* *AIR_SYSTEM_DELAY - WEATHER_DELAY:*  delay (in minutes) attributed to each reason
+* *FLIGHT_NUMBER and TAIL_NUMBER:* flight nad aircraft identifiers   
+* *TAXI_OUT:* time (in minutes) between gate and wheels off  
+* *TAXI_IN:* time (in minutes) between wheels on and arrival  
+* *WHEELS_OFF:* time when aircraft wheels leaves the ground  
+* *WHEELS_ON:* time when aircraft wheels touches the ground  
+* *AIR_TIME:* The time duration between wheels_off and wheels_on time  
+* *ELAPSED_TIME:* AIR_TIME+TAXI_IN+TAXI_OUT  
+* *SCHEDULED_TIME:* scheduled duration (in minutes) of flight  
+* *CANCELLATION_REASON:* Reason for Cancellation of flight: A - Airline/Carrier; 
+B - Weather; C - National Air System; D - Security  
+
+###**2. Data Cleaning**
+
+Before removing any variable always ask questions about what you want to find 
+out. Since I am only interested in take-off I can delete arrival-related 
+variables.
+
+```{r variables, eval=TRUE}
+colnames(flight.data) 
+#Delete variables:
+#FLIGHT_NUMBER, TAIL_NUMBER, DEPARTURE_TIME, TAXI_OUT,WHEELS_OFF, 
+#SCHEDULED_TIME, ELAPSED_TIME, AIR_TIME, WHEELS_ON,TAXI_IN, SCHEDULED_ARRIVAL, 
+#ARRIVAL_TIME, ARRIVAL_DELAY,
+flight.data <- flight.data[,-c(6,7,11,13:17,19:23)]
+```
+
+How many flights were cancelled or diverted?
+
+```{r cancelled, eval=TRUE}
+flights.cancelled <- which(flight.data[, CANCELLED==1 | DIVERTED==1])
+length(flights.cancelled)
+```
+
+Cancellations are special circumstances of delays but they can either be cancelled 
+for a couple of hours or days which means that it has the potential of tremendously 
+affecting the distribution of delays so I will remove all flights that were cancelled 
+and diverted. 
+
+```{r remove cancel, eval=TRUE}
+flight.data <- flight.data[-flights.cancelled, ] 
+flight.data <- flight.data[, -c(11:12)]#remove cancelled and diverted columns
+```
+
+Similarly from the summary table at the beginning, about 1.5% of flights do not 
+have a recording for delay time or time of departure, so for simplicity of this 
+notebook I will simply remove such rows rather than do missing value imputation 
+as it is not a significant portion of the data set, although this can reduce 
+prediction accuracy. A great method that could be used to generate values for 
+those missing delay observations is the stochastic regression imputation, in 
+which you replace the missing value with a predicted value from a regression plus 
+a random residual value.It has all the advantages of a regression imputation but 
+adds a random component
+as well.
+
+```{r complete cases, eval=TRUE}
+flight.data <- flight.data[complete.cases(flight.data[, DEPARTURE_DELAY]),]
+```
+
+The minutes of delay attributed to each of the possible reasons have NAs when 
+they are not the cause of delay. I will change that to 0s instead. 
+
+```{r change delay reasons NAs to 0s, eval=TRUE}
+flight.data[, 12:16][is.na(flight.data[, 12:16])] <- 0 #change all NAs to 0s
+```
+
+There are certain inconsistencies with the values in Airport of Origin and 
+Destination Airport columns. Certain rows have five digit numeric airport code 
+instead of the IATA 3 letter code. I will fix this before continuing 
+exploration. For this I will be using another data set that contains 
+information about airports. The data set can be found at
+https://www.kaggle.com/ckstevens02/airport-codes-to-iata. The library used is 
+'purrr'. This package allows us to use the map() function which works similar to 
+lapply. It takes a vector and then applies a function to each element of the vector.
+The advantage of 'purrr' is that it allows several versions of map() that specify 
+the structure of the output. In this case since I want my output to be a vector 
+of characters I will use the map_chr() function. 
+
+```{r fixing airport codes, eval=TRUE, warning=FALSE}
+library(purrr)
+#upload new data set
+airport.codes <- read.csv("Airport Code to IATA.csv", header = TRUE)
+head(airport.codes)
+attach(airport.codes)
+
+#evaluate which airport indexes have the propoer code
+contained_fun <- function(x) {grepl("^[A-Za-z]+$", x, perl = T)}
+contained <- map_lgl(flight.data$ORIGIN_AIRPORT, contained_fun)
+contained <- which(contained == FALSE) #vector of indexes with wrong codes
+
+#function to retrieve corresponding IATA code for airport of origin
+retrieve_orig_codes <- function(x) {
+    output<- as.character(airport.codes$IATA[which(airport.codes$Codes == 
+                                 flight.data$ORIGIN_AIRPORT[x])])
+    if(length(output) == 0) {
+        output<- "unknown"
+    }
+    output
+}
+correct_codes<- map_chr(contained, retrieve_orig_codes)
+flight.data$ORIGIN_AIRPORT[contained] <- correct_codes #replace with correct codes
+
+#function to retrieve corresponding IATA code for destination airport
+retrieve_dest_codes <- function(x) {
+    output <- as.character(airport.codes$IATA[which(airport.codes$Codes == 
+                                 flight.data$DESTINATION_AIRPORT[x])])
+    if(length(output) == 0) {
+        output<- "unknown"
+    }
+    output
+}
+correct_codes<- map_chr(contained, retrieve_dest_codes)
+flight.data$DESTINATION_AIRPORT[contained] <- correct_codes#replace with correct codes
+
+#remove row with unkown aiport
+unknown_aiport <- which(flight.data[, DESTINATION_AIRPORT == "unknown" | 
+                                        ORIGIN_AIRPORT == "unkown"])
+flight.data <- flight.data[-unknown_aiport, ] 
+```
+
+Let me fix the dates and times columns into correct format. The 'lubridate' 
+library allos for quick and easy parsing of date/time. It has simple functions 
+that allows to quickly extract the components of a date-time variable. It also 
+allows for mathematical operations to be run on date/time. 
+
+```{r, warning=FALSE}
+library(lubridate)
+library(chron)
+
+#turn numeric value from 0000 to 2400 into hh-mm-ss format
+flight.data$TIME <- times( sprintf( "%d:%02d:00", 
+                                    flight.data$SCHEDULED_DEPARTURE %/% 100, 
+                                    flight.data$SCHEDULED_DEPARTURE %% 100 ))
+
+#combine day, month, year and day of week into a single date variables
+flight.data$DATE <- as.Date(with(flight.data, paste(2015, MONTH, DAY,sep = "-")),
+                            "%Y-%m-%d",tz="UTC")
+
+#combine date and time
+flight.data$datetime<-as.POSIXct(paste(flight.data$DATE, flight.data$TIME), 
+                                 format="%Y-%m-%d %H:%M:%S")
+
+```
+
+Detecting outliers is essential to understanding their effect on a predictive model. Most of the time it is a grey area, and its up to the statistician's judgment how to treat them. First I'll identify outliers using the univariate approach, meaning those observations that lie outside 1.5 * Inter-Quartile Range. Using this method all delays less than -23 minutes, or more than 25 minutes will be classified as outliers. I can also use the scores() function from the 'outliers' package where outliers are classified as observations that lie beyond a given percentile on a score. Here I will be using the 90th percentile on a t-score. Also, it is important to take in account not only the Y variable itself but its relation to the X predictors, that's why it would be smart to look at cook's distance. It computes the influence each data point has on the predicted outcome.  
+As seen in the graph below by removing outliers the concentration of data points
+gets closer to a normal curve, with mean 0, fixing part of the right skweness of 
+the original data. 
+
+```{r remove outliers, eval=TRUE, warning=FALSE}
+library(outliers)
+#identify outlier values using univariate approach
+outlier_values <- boxplot.stats(flight.data$DEPARTURE_DELAY)$out 
+
+outiers<-outlier(flight.data$DEPARTURE_DELAY)
+outiers2<-outlier(flight.data$DEPARTURE_DELAY, opposite=TRUE)
+
+index<-scores(flight.data$DEPARTURE_DELAY, type="t", prob=0.90) 
+index<- which(index == TRUE)
+#cook's ditance 
+#data_for_outliers<- flight.data[, -c(1,2,3,4,8,11:16,17,19)]
+#mod <- lm(DEPARTURE_DELAY ~ ., data=data_for_outliers)
+#cooksd <- cooks.distance(mod)
+
+x <- flight.data$DEPARTURE_DELAY #delays including outliers
+flight.data <- flight.data[-index, ] #remove outliers 
+y <- flight.data$DEPARTURE_DELAY #delays excluding outliers
+
+#plot density
+plot(density(x), xlim = c(-50,200), main = "Delay Distribution", 
+      xlab = "Departure delay in minutes")
+polygon(density(x), col = "red", border = "red")
+polygon(density(y), col = "blue", border = "blue")
+# Add a legend
+legend("topright", 
+  legend = c("Delays with outliers", "Delays without outliers"), 
+  col = c("red", "blue"), 
+  pch = 17, 
+  pt.cex = 2, 
+  cex = 0.5, 
+  text.col = "black", 
+  horiz = F , 
+  inset = c(0.1, 0.1))
+```
+
