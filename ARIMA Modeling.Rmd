@@ -1,0 +1,305 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+###**Diving into ARIMA **
+When analyzing the relationship between a response $Y_{i}$ and a covariate 
+$X_{i}$, it is customary to run a regression to obtain a parameter. However when
+the response is measured at different points in time, regression is restricted 
+by the autocorrelation of time. Common methods are no longer viable becuase 
+observations are no longer independent and identically distributed. This 
+dependence is what differs time series analysis from other regressive models. 
+Even though it is constrained by the sequential frequency of time, it is time 
+itself that offers a rich structure to the model. To handle this type of data, 
+we rely on a method referred as time series analysis. 
+
+This method splits into two approaches, which are not necesarilly mutually 
+exclusive. On the one hand, we have 'time domain approach' which prioritizes 
+lagged relationships. On the other hand, 'spectral domain apprach' prioritizes 
+periodicity. Before leaning in any direction, visualization is crucial as it 
+often suggests the method of analysis needed. 
+
+Even though I will not be explicitly showing any complex numbers in my analysis, 
+in order to understand the mathematics of the model you must know it well. It 
+turns out that understanding time series, specifically ARIMA models often involve 
+understanding polynomials over the complex numbers so make sure to review its 
+arithmetic, geometric series, polynomials,cartesian and polar coordinates if you 
+want to dive into the mathematical details of time series modeling. 
+
+Now, back in track, we can consider a time series as a sequence of random variable 
+indexed according to the order they were obtained in time. 
+Ex: $x_{1}, x_{2}, x_{3}, \dots,x_{n}$ where $x_{1}$ denotes the value obtained 
+at the first time period, $x_{2}$ at the second time period and $x_{n}$ at 
+the $n$ time period. It is important to state that the same distance in time 
+between 1 and 2 is found between 2 and 3 and so on. 
+
+By definition any collection of random variables $\{X_{t}\}$indexed by $t$ is 
+referred to as a stochastic process, and $\{x_{t}\}$ as a realization of the 
+series. For this notebook, $t$ will be considered a discrete structure and will 
+span over the integers of $t=0,\pm1, \pm2, \dots$
+
+Lets go over some general definitions of time series:
+
+**CDF**:
+
+$$F(c_{1},\dots,c_{T})=P(X_{1}\le c_{1},\dots,X_{T} \le c_{T})$$
+
+**Marginal CDF's**:
+$$F_{t}(c_{t})=P(X_{t} \le c_{t})$$
+
+**Mean function**:
+$$\mu_{t} = \mu_{X_{t}}= E[X_{t}]$$
+
+**Variance function**:
+$$\sigma^{2}_{t} = E[(X_{t}-\mu_{t})^{2}]$$
+
+**Autocovariance function**: describes the strength of the linear relationship 
+between random variables X at time points $t$ and $s$. 
+
+The covariance between 2 random variables $X$ and $Y$ is:  
+$$Cov(X,Y) =  E[(X-\mu_{X})(Y-\mu_{Y})]$$
+When $\{X_{t}\}$ is a time series we define the autocovariance function as
+
+$$\gamma(t,s)=Cov(X_{t},X_{s})$$
+
+**Autocorrelation function (ACF)**: describes the correlation, meaning extent at
+which the variable $X$ at time points $s$ and $t$ fluctuates together.
+
+$$\rho(t,s)=Cor(X_{t},X_{s}) =  \frac{\gamma(t,s)} {\sqrt{(\gamma(t,t) \gamma(s,s)}}$$
+
+If $\rho =0$ we say that X and Y are uncorrelated, meaning there is no linear 
+relationship between X and Y on average. 
+
+Recall, if X and Y are independent they are uncorrelated but converse is not true!
+
+Lets start with the basic time series model: white noise $\{W_t\}$. White noise 
+is a random signal that has no pattern, just random variation. In other words 
+all frequencies are equally represented. Mathematically, this process has a mean 
+of zero ($E(X_t)=0$), has no correlation between its observations across time 
+($Cor(X_t,X_s)=0$), and a finite variance ($\sigma_{X_t}^{2} < \inf$). The 
+Autocovariance function is as follows:
+
+$$\gamma(s,t)= \begin{cases} \sigma^2 \space if \space s=t
+               \\ 0 \space \space if \space s \ne t \end{cases}$$
+                
+ACF is as follows:
+
+$$\rho(s,t)= \begin{cases} 1\space if \space s=t
+               \\ 0 \space  if \space s \ne t \end{cases}$$
+
+
+If we build a series out of a collection of white noise, then we would be 
+creating a moving average(MA). A moving average can be defined conceputally as a 
+linear regression of the current value of the series against the previous 
+observed white noise error terms. The first order moving average model MA(1) can 
+be expressed as
+
+$$x_t= \mu + W_t + \alpha W_t-1$$
+and the $q^{th}$ order moving average can be defined as MA(q)
+
+$$X_t= \mu + W_t + \alpha_1 W_{t-1} + \alpha_2 W_{t-2} + \dots + \alpha_q W_{t-q}$$
+
+Next, lets examine Autoregressive models. This series happens when a value from 
+a time seires is regress on previous values from that same time series. For 
+example a first order AR(p=1) would be expressed as:
+
+$$X_t= \beta X_{t-1} + W_t$$
+
+The autoregressive, p, component is the autocorrelation order meaning the number 
+of lags used for the model and represents how it will be using past data to make 
+predictions.
+
+So far, we have explained the AR(p) and MA(q) components of ARIMA. What brings 
+these two together is Integration(I) which can be attributed to stationarity. 
+Stationarity refers to a state where statistical parameters converge to a constant 
+in relation to time (Nau, 2018). As Brockel describes in his second chapter, 
+stationarizing removes the variability of time from the series in order to be 
+able to extrapolate, otherwise the information of today will share no common 
+ground with the information of tomorrow. You can think of it as the conceptual 
+equivalence of making the observations identically distributed. For the purpose 
+of this notebook, we'll only consider the definition of weakly stationary process 
+where the mean does not depend on time and the autocovariance function and ACF 
+depends on s and t only through |s-t|. For a stationary process we write 
+
+$$\rho(h)=\rho(t,t+h) =  \frac{\gamma(h)} {\sqrt{(\gamma(0) \gamma(h)}}$$
+
+Stationarity is often achieved by differencing the series. The parameter d 
+represents the degree of differencing meaning how many times will the series be 
+subtracting its current minus previous value. This can be derived logically from 
+the ACF and PACF plots. ACF plot displays the correlation between a series and 
+its lags, while PACF displays the correlation between a variable and its lags 
+that is not explained by previous lags.
+
+Now that we have broken down ARIMA model into its components, we can go over its 
+application. When we have a mixed model, autocorrelation is analyzed and the model 
+order is selected. In order to determine parameters we plot ACFS against lags to 
+visualize critical lag points, and confirm using ARIMA model estimate for (p,d,q) 
+which stand for autocorrelation order, degrees of differencing, and moving averages 
+order respectively.
+
+Finally the forecast accuracy may be evaluated by minimizing common metrics such 
+as Mean Absolute Percent Error (MAPE) , Root Mean Square Error (RMSE), and Mean 
+Scaled Absolute Error (MASE). A forecast is just as good as its uncertainty. 
+(Torres, 2018) .
+
+
+###**Modeling and forecastin using time series **
+
+#### Pre-processing: variable selection, response is continuous(minutes of delay)
+ 
+```{r pre-process, eval=TRUE}
+#combine day, month, year and day of week into a single date variables
+flight.data$DATE <- as.Date(with(flight.data, paste(2015, MONTH, DAY,sep = "-")),
+                            "%Y-%m-%d")
+
+#partition data
+sample_train <- flight.data[DATE < "2015-10-1", c("DATE","DEPARTURE_DELAY")]
+#sample size 200,000
+sample_train <- sample_train[sample(nrow(sample_train), 75000), ]
+sample_test <- flight.data[DATE >= "2015-10-1", c("DATE","DEPARTURE_DELAY")]
+sample_test <- sample_test[sample(nrow(sample_test), 25000), ]
+```
+
+#### IDENTIFICATION  
+
+This step involves decomposing the data and testing the stationarity of the series 
+to determine if any differencing is needed. First we’ll decompose data in its time 
+cycles: weeks and months. Moving averages is a technique used to trace series 
+biggest peaks to biggest troughs while excluding random noise, meaning it captures 
+the average movement of the series, therefore smoothing the fluctuation. Figure 
+I below captures the average mobility of delays per week as seen in blue, 
+the average mobility of delays per month as seen in green and whole series as 
+seen in red. The fluctuation is higher from week to week than from month to month 
+which will already hints the importance of lag 7. 
+
+```{r prep, eval= TRUE}
+library(forecast)
+library(lubridate)
+month <- month(sample_train$DATE)
+week <- week(sample_train$DATE)
+day <- yday(sample_train$DATE)
+dayofweek <- wday(sample_train$DATE, label = TRUE, abbr = FALSE)
+sample_train <- cbind(sample_train, month, week, day, dayofweek)
+month_delay <- sample_train %>% group_by(month) %>% 
+    summarise(ave_delay = mean(DEPARTURE_DELAY))
+week_delay <- sample_train %>% group_by(week) %>% 
+    summarise(ave_delay = mean(DEPARTURE_DELAY))
+day_delay <- sample_train %>% group_by(day) %>% 
+    summarise(ave_delay = mean(DEPARTURE_DELAY))
+dayofweek_delay <- sample_train %>% group_by(dayofweek) %>% 
+    summarise(ave_delay = mean(DEPARTURE_DELAY))
+
+ggplot(dayofweek_delay, aes(x = dayofweek, y = ave_delay, color = dayofweek, 
+                            size = 0.8)) +
+    geom_path() +
+    geom_point() +
+    labs(ylab = "Minutes", xlab="Day of the week", 
+         title = "Average delay per day of the week") +
+    theme(legend.position = "none") +
+    stat_smooth(color = "red", fill= "red" , method = "loess") 
+
+
+count_ts <- ts(sample_train[, c('DEPARTURE_DELAY')])
+sample_train$delay_ma <- ma(sample_train$DEPARTURE_DELAY, order = 7)
+sample_train$delay_ma30 <- ma(sample_train$DEPARTURE_DELAY, order = 30)
+ggplot() +
+    geom_line(data = sample_train, aes(x = DATE, y = DEPARTURE_DELAY, 
+                                       colour = "Counts")) +
+    geom_line(data = sample_train, aes(x = DATE, y = delay_ma,   
+                                       colour = "Weekly Moving Average")) +
+    geom_line(data = sample_train, aes(x = DATE, y = delay_ma30, 
+                                       colour = "Monthly Moving Average")) +
+    ylab('Delay Count')
+```
+
+Next, we’ll decompose data into time series building blocks.  As seen in Figure 
+2 below, there exists no seasonal component, meaning that fluctuations of the 
+data are not linked to calendar cycles. Usually to capture seasonality, 2 or more 
+years of data must be analyzed, therefore the data used in this research restricts 
+us from observing any. Trend component shows us that the overall pattern of the 
+series oscillates around 10 minutes of delay but has a huge range between 0 and 
+60 minutes demonstrating the volatility of the series. And the remainder shows 
+convergence to 0 which shows that error is normalized. This convergence already 
+depicts that the series is stationary.  Stationarity refers to a state where 
+statistical parameters converge to a constant in relation to time (Nau, 2018). 
+As Brockel describes in his second chapter, stationarizing remove the variability 
+of time from the series in order to be able to extrapolate, otherwise the 
+information of today will share no common ground with the information of tomorrow. 
+Augmented Dickey-Fuller (ADF) test gave us a p-value of 0.01, meaning that the 
+series is already stationarized, requiring no further transformation. Essentially, 
+the test adds lagged differences to the fitted regression model, hence shifting 
+the series by a lag length before comparing it with itself to evaluate the 
+autocorrelation function. (Brockwell & Davis, 2002, p.137-179) Lag length should 
+minimize correlation of residuals therefore it is chosen by minimizing  BIC or AIC.
+
+```{r seasonal, eval=TRUE}
+#calculate seasonal component 
+count_ma <- ts(na.omit(sample_train$delay_ma), frequency = 30)
+decomp <- stl(count_ma, s.window = "periodic")
+deseasonal_delay <- seasadj(decomp)
+plot(decomp)
+```
+
+#### Parameter Estimation  
+
+This second step is where autocorrelation is analyzed and the model order is 
+selected. In order to determine parameters we plot ACFS against lags to visualize 
+critical lag points, and confirm using  ARIMA model estimate for (p,d,q) which 
+stand for autocorrelation order, degrees of differencing, and moving averages 
+order respectively. The d parameter represents the degree of differencing meaning 
+how many times will the series be subtracting its current minus previous value. 
+This can be derived logically from the ACF and PACF plots. ACF plot displays the 
+correlation between a series and its lags, while PACF displays the correlation 
+between a variable and its lags that is not explained by previous lags. As we can 
+observe in figure 3 below, ACF cuts off after lag 7, while PACF tails off with a 
+an oscillation that might suggest an aunderlying pattern, suggesting the series
+might be a MA(7). 
+
+```{r acfs, eval= TRUE}
+par(mfrow = c(1,2))
+Acf(count_ma, main = '')
+Pacf(count_ma, main = '')
+```
+
+We can start stationarizing model using order d=1, and differencing further if 
+needed. Figure 4 below shows the new series at lag 1. As we can see the series 
+seems to be oscillating around 0 with no visible trend, which means it is 
+sufficient for the model.
+
+```{r diff, eval=TRUE}
+library(tseries)
+count_d1 <- diff(deseasonal_delay, differences = 1)
+plot(count_d1)
+adf.test(count_d1, alternative = "stationary")
+
+Acf(count_d1, main = 'ACF for Differenced Series')
+Pacf(count_d1, main = 'PACF for Differenced Series')
+```
+
+By using built in functions in R, ARIMA provided an estimate of (p=3, d= 0, q= 2), 
+contradicting our previous estimate of d=1. It’s important to know that parameter 
+estimation is an iterative step, meaning you decide on a value and calculate its 
+results, and then go back again to deciding another value and do the same to 
+compare multiple combinations of parameters. After each combination, ACF plots 
+are observed as well as residual error and AIC. At the end the best fit was 
+obtained from (p=3, d= 1 and q=7) as seen in Figure 5 below. 
+
+```{r evaluating, eval=TRUE}
+fit <- auto.arima(deseasonal_delay, seasonal = FALSE)
+fit
+#if model fits correctly, wewould expect no significant autocorrelations present
+tsdisplay(residuals(fit), lag.max = 45, main = "(3,0,2) Model Residuals")
+
+#change parameters
+fit2 = arima(deseasonal_delay, order = c(3,0,7))
+tsdisplay(residuals(fit2),lag.max = 15, main = "(3,0,7) Model Residuals")
+```
+
+```{r forecast, eval=TRUE}
+#now do the forecasting
+fcast <- forecast(fit2, h = 49479)
+plot(fcast)
+```
+
+
