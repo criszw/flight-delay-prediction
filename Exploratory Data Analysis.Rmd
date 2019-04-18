@@ -1,0 +1,221 @@
+---
+title: "EDA"
+output: html_notebook
+---
+
+###**3. Exploratory Data Analysis**
+
+Now I'll explore some of its variables.
+Let me begin by installing a couple of graphing packages before hand.
+
+```{r vis packages, eval=TRUE}
+library(dplyr)
+library(ggplot2)
+```
+
+**Reasons for delay:**
+
+There are over a million flights whose reason for delays were not recorded. 
+From the complete cases, it can be observed that delay for security is almost null, 
+and that the most common reason is air system which involves airport operations, 
+heavy traffic volume, and air traffic control. Therefore I would expect to have a 
+high correlation between air system delay, and large busy airports. 
+
+```{r plot1, eval=TRUE}
+#remove CANCELLATION-REASON
+flight.data<-flight.data[, -"CANCELLATION_REASON"]
+
+x <- cbind(flight.data$SECURITY_DELAY, flight.data$AIRLINE_DELAY,
+           flight.data$AIR_SYSTEM_DELAY, flight.data$LATE_AIRCRAFT_DELAY,
+           flight.data$WEATHER_DELAY)
+names(x) <- c("security", "airline", "air.system", "late.aircraft", "weather")
+x <- as.data.frame(x)
+
+total_delay <- numeric(5)
+ave_delay <- numeric(5)
+max_delay <- numeric(5)
+number_delays <- numeric(5)
+for(i in 1:5) { #get statistics
+    y <- x %>% count(x[,i]) %>% rename(avg_count = n)
+    colnames(y) <- c("delay", "freq")
+    y <- y[-1,]
+    total_delay[i] <- sum(y$freq * y$delay)
+    ave_delay[i] <- total_delay[i] / sum(y$freq)
+    max_delay[i] <- max(y$delay)
+    number_delays[i] <- sum(y$freq) 
+}
+
+#create summary table
+delay_reasons <- rbind(total_delay,ave_delay,max_delay, number_delays) 
+colnames(delay_reasons) <- c("Security", "Airline", "Air System", "Late Aircraft",
+                            "Weather")
+rownames(delay_reasons) <- c("Total delayed minutes", "Average delay", 
+                             "Maximum delay", "Number of flights delayed")
+delay_reasons <- round(delay_reasons, 0)
+delay_reasons
+
+#pie chart
+names <- c("Security", "Airline", "Air System", "Late Aircraft", "Weather")
+pct <- round(delay_reasons[1,] / sum(delay_reasons[1,]) * 100, 2)
+names <- paste(names, pct) # add percents to labels 
+names <- paste(names,"%",sep = "") # ad % to labels 
+plot1<- pie(delay_reasons[1,], labels = names, col = rainbow(length(names)),
+    main = "Reasons for delay", radius = 1, cex = 0.8)
+
+```
+
+
+
+**Ranking of Airlines:**
+
+```{r plot2, eval=TRUE}
+#ranking of airlines
+airline_abb <- c("AA", "AS", "B6", "DL", 
+               "EV", "F9", "HA", "MQ", 
+               "NK", "OO", "UA", "US", 
+               "VX", "WN")
+airline <- c("American", "Alaska", "JetBlue", "Delta", 
+            "Atlantic Southeast", "Frontier", "Hawaiian", "American Eagle",
+            "Spirit", "Skywest", "United", "US", 
+            "Virgin America", "Southwest Airlines")
+
+a_flight_count <- tapply(flight.data$AIRLINE, flight.data$AIRLINE, function(x)
+    length(x) / nrow(flight.data) * 100)
+a_mean <- tapply(flight.data$DEPARTURE_DELAY, flight.data$AIRLINE, mean)
+a_sd <- tapply(flight.data$DEPARTURE_DELAY, flight.data$AIRLINE, sd)
+a_max <- tapply(flight.data$DEPARTURE_DELAY, flight.data$AIRLINE, max)
+a_min <- tapply(flight.data$DEPARTURE_DELAY, flight.data$AIRLINE, min)
+airline_summary <- data.frame(airline_abb, airline, a_flight_count, a_max, a_min,
+                             a_mean, a_sd)
+
+names(airline_summary) <- c("Airline Abreviation", "Airline","% of Total Flights",
+                           "Max Delay", "Min Delay", "Mean Delay", "Standard Dev
+                           Delay")
+
+plot2 <- ggplot(airline_summary, aes(x = reorder(airline, -airline_summary[,3]),
+                                   y = airline_summary[,3], fill = airline)) + 
+    geom_bar(stat = "identity") +
+    labs(y = "Percentage", x = "", title =  "% of all flights among airlines")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    theme(legend.position = "none")
+plot2
+
+par(mfrow = c(2,1))
+plot3 <- ggplot(flight.data, aes(x = AIRLINE, y = DEPARTURE_DELAY, fill = AIRLINE)) + 
+    geom_boxplot(outlier.shape = NA) +
+    labs(title = "Departure Delays per Airline",
+         x = "Airline",
+         y = "Delays (min)") +
+    scale_x_discrete(labels = airline) +
+    scale_y_continuous(limits = c(-30, 60)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    theme(legend.position = "none") # Remove legend
+
+plot4 <- ggplot(flight.data, aes(AIRLINE, DEPARTURE_DELAY)) +
+    geom_count(aes(col = AIRLINE, show.legend = FALSE)) +
+    labs(title = "Departure Delays per Airline", x = "Airline",
+         y = "Delays (min)") +
+    scale_x_discrete(labels = airline) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    theme(legend.position = "none")
+plot3;plot4
+
+```
+
+Created data frame categorizing airports based on the number of flights departing
+from there. Combined it with another data set containing geographic locations of 
+airports to create the Tableau interactive map below. 
+
+```{r, eval= FALSE}
+#pre-processing for mapping
+airport_classification <- flight.data %>% group_by(ORIGIN_AIRPORT) %>% 
+    summarise(total = sum(DEPARTURE_DELAY), flight = n())
+aiport.count <- cut(airport_classification$flight, 
+                                     breaks = c(0,100, 1000, 10000, 100000,
+                                                500000, 1000000, 10000000), 
+                                     labels = c("< 100","100 << 1,000",
+                                                "1,000 << 10,000", "10,000 <<
+                                                100,000","100,000 << 500,000", 
+                                                "500,000 << 1,000,000",
+                                                ">1,000,000"), 
+                                     right = FALSE)
+airport_classification <- cbind(airport_classification, aiport.count)
+```
+
+<iframe align = "center" width = "1000" height = "1000" src="https://public.tableau.com/views/FLightstableau/FlightsperAirport?:embed=y&:display_count=yes&publish=yes"/>
+
+The tables below show the most common routes in 2015. It specifies the number of 
+flights between these airports ('count'), and the average delay in these routes
+('delay'). It is evident that as routes becomes more frequent the variability of
+delay approximates 0, while with unusual routes the average delay is more volatile. 
+
+```{r}
+#common journeys and their mean delays
+routes <- summarise(group_by(flight.data,ORIGIN_AIRPORT,DESTINATION_AIRPORT),
+                  count = n(), delay = sum(DEPARTURE_DELAY) / n())
+```
+
+Most frequent routes:
+```{r}
+routes[order(routes$count,decreasing = T)[1:20],]
+```
+
+Least frequent routes:
+```{r}
+routes[order(routes$count,decreasing = F)[1:20],]
+```
+
+The following graph explore how delays relate to the scheduled time of departure.
+Even though on average delays are close to 0 minutes per day, there is a 
+higher probability of variability in delays between midnight and 5am. During those 
+early times in the morning, delays can go up to almost 40 minutes in delay.  
+
+```{r, warning=FALSE}
+#how does delay vary with scheduled time
+library(tidyverse)
+delay_schedule <- flight.data %>% group_by(TIME) %>% summarise(ave = 
+                  sum(DEPARTURE_DELAY) / n())
+
+ggplot(aes(x = TIME, y = ave), data = delay_schedule) + 
+    geom_line(colour="purple") +
+    scale_x_continuous(labels = c("0.00" = "00:00 AM", "0.25" = "06:00 AM",
+                              "0.50" = "12:00 PM", "0.75" = "06:00 PM", "1.00" =
+                              "11:59 PM")) +
+    labs(title = "Average delay throughout a 24-hour day", y= "Average delay
+         in minutes")
+
+```
+
+On other hand, when analyzing week of the days, there is only about a minute 
+difference in average delay, meaning that the day of the week the flight 
+is scheduled has no significant effect on its delay time. 
+
+```{r, plotting time, warning= FALSE}
+
+delay_schedule <- flight.data %>% group_by(DAY_OF_WEEK) %>% summarise(ave = 
+                  sum(DEPARTURE_DELAY) / n())
+
+delay_schedule$DAY_OF_WEEK <- as.factor(delay_schedule$DAY_OF_WEEK)
+par(mfrow=c(2,1))
+ggplot(aes(x = DAY_OF_WEEK, y = ave, colour=DAY_OF_WEEK), data = delay_schedule) + 
+    geom_point( size=3) +
+    scale_x_discrete(breaks = c(1, 2, 3, 4, 5, 6, 7),
+                     labels = c("SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY",
+                               "THRUSDAY", "FRIDAY", "SATURDAY")) +
+    labs(title = "Average delay per day of the week", y = "Average delay in minutes",
+         x = "Day of the week") +
+    ylim(-5, 5) +
+    theme(legend.position = "none")
+
+ggplot(flight.data, aes(x = as.factor(DAY_OF_WEEK), y = DEPARTURE_DELAY, 
+                        fill = as.factor(DAY_OF_WEEK))) + 
+    geom_boxplot(outlier.shape = 17) +
+    labs(title = "Departure delays boxplot per day of the week",
+         x = "",
+         y = "Delay (min)") +
+    scale_x_discrete(labels = c("SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY",
+                                "THRUSDAY", "FRIDAY", "SATURDAY")) +
+    scale_y_continuous(limits = c(-40, 60)) +
+    theme(legend.position = "none") # Remove legend
+```
+
