@@ -1,0 +1,190 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+###**CLASSIFICATION ALGORITHMS: PREDICTING DELAY**
+
+The previous section dealt with exploration of the data set and cleaning the data. 
+Now I will focus on predictive analysis. I will begin by predicting if a flight 
+will be delayed by at least 15 minutes or not. For that I introduce a binary dummy 
+variable called 'delay_15' where 1 is recorded for any delay over 15 minutes, and 
+0 otherwise. This section explores some of the supervised classification algorithms 
+that could be used to predict delay. I will use cross-validation to assess the stability of the training models. This significantly reduces bias as we are using most of the data for fitting, and also significantly reduces variance as most of the data is also being used in the validation set. 
+
+```{r binary resp, eval=TRUE}
+delay_15 <- (flight.data$DEPARTURE_DELAY > 15) * 1
+flight.data <- cbind(flight.data, delay_15)
+```
+
+**Data partition**
+
+I'm going to first run a model using only a subset of original data. Instead of 
+choosing a random selection, I will be choosing the airport of Atlanta which has 
+the most flights (about 6% of total flights) in 2015 in the US. 
+
+```{r atlanta data, eval=TRUE, warning= FALSE}
+library(caret)
+
+#exclude reasons for delay
+atlanta_DL <- flight.data[ORIGIN_AIRPORT == "ATL", -c(1, 4, 6,8, 9, 11:15, 16, 17)]
+atlanta_DL$MONTH <- as.factor(atlanta_DL$MONTH)
+atlanta_DL$DAY <- as.factor(atlanta_DL$DAY)
+atlanta_DL$AIRLINE <- as.factor(atlanta_DL$AIRLINE)
+atlanta_DL$delay_15 <- as.factor(atlanta_DL$delay_15)
+```
+
+Here I will be partitioning the data into the training and testing sets. Only the
+training set will be used to build the model and to do cross validation. This will
+reduce the bias in the model. Testing data will just be applied at the end to 
+evaluate prediction errors. 
+
+```{r}
+training_index <- createDataPartition(atlanta_DL$delay_15, p = 0.75, list = FALSE)
+training_data <- atlanta_DL[training_index,] 
+testing_data <- atlanta_DL[-training_index,] 
+```
+
+*Logistic regression*:
+
+```{r glm, eval=TRUE, warning=FALSE}
+library(caret)
+#Randomly shuffle the data
+training_data <- training_data[sample(nrow(training_data)),]
+
+#logit regression
+modl <- glm(delay_15 ~ . ,family = binomial, data = training_data)
+
+#cross-validation
+library(boot)
+k   <- 10
+kfCV <- cv.glm(data=training_data, glmfit=modl, K=k)
+kfCV$delta
+
+# Predict
+l_reg_predict <- predict(kfCV, newdata=testing_data,type="response") #logit
+confusionMatrix(reference = testing_data$delay_15, data =
+                    as.factor(1* (l_reg_predict > 0.5)))$overall['Accuracy']
+```
+Using logistic regression we achieved a 94% accuracy. It is also important to 
+highlight that sensitivity was near 1, but specificity was low, meaning the model 
+is overfitting values into on-time, therefore failing to detect which ones will 
+be delayed. 
+
+Below are other classification models that can be applied as well.  
+
+*GBM (Generalized Boosting Method)*:  
+
+In this case,we will control the resampling by cross-validating the data 3 times, 
+hence training it 3 times on different subsets of the data before choosing the 
+best parameters (trees, shrinkage, and interaction depth). 
+
+```{r gbm , eval= FALSE}
+library(caret)
+library(gbm)
+#controlling the internal resampling of data
+modelControl <- trainControl(method = 'cv', number = 3, returnResamp = 'none',
+                             summaryFunction = twoClassSummary, classProbs = TRUE) 
+outcomeName <- "delay_15"
+predictorsNames <- names(training_data.RF)[names(training_data.RF) != outcomeName]
+
+#fixing factor levels names
+levels(training_data.RF$delay_15) <- c("on-time", "delayed") 
+
+levels(training_data.RF$MONTH) <- c("JAN", "FEB", "MARCH", "APRIL", "MAY", 
+                                    "JUNE", "JULY", "AUG", "SEP", "NOV", "DEC")
+
+levels(training_data.RF$DAY_OF_WEEK) <- c("Sun", "Mon", "Tue", "Wed", "Thu", 
+                                         "Fri", "Sat")
+
+levels(training_data.RF$DAY) <- paste("day", levels(training_data.RF$DAY))
+
+#modeling
+gbm_Model <- train(training_data.RF[, predictorsNames], 
+                   training_data.RF[,outcomeName], 
+                   method ='gbm', 
+                   trControl = modelControl,  
+                   metric = "ROC",
+                   preProc = c("center", "scale"))
+```
+
+*Random Forest*:
+```{r rf , eval= FALSE}
+library(randomForest) 
+model.rf <- randomForest(x = training_data[, -"delay_15"], 
+                         y = training_data$delay_15, proximity = TRUE, 
+                         importance = TRUE)
+# Random Forest CV:
+model_rf_cv <- train(delay_15~., data=training_data, trControl = control, method = "rf", tuneLength = 15)
+#predict
+random_forest_validation <- predict(model.rf.cv, testing_data$delay_15)
+```
+
+*Regularized Discriminant Analysis*:
+```{r rda , eval= FALSE}
+library(klaR)
+#Build the model
+cv_5_rand = trainControl(method = "cv", number = 5, search = "random")
+fit_rda_rand = train(delay.15 ~ ., data = training_data, method = "rda",
+                     trControl = cv_5_rand, tuneLength = 9)
+#Predict using the model
+pred_mra <- predict(fit_rda_rand, testing_data$delay_15)
+```
+
+*Neural Network*:
+```{r nerual n , eval= FALSE}
+library(nnet)
+#Build the model
+model.nnet <- nnet(delay_15~., data = training_data, size = 4, decay = 0.0001,
+                   maxit = 500)
+#build cv 
+require(caret)
+my.grid <- expand.grid(.decay = c(0.5, 0.1), .size = c(5, 6, 7))
+mynnetfit <- train(DOC/33.80 ~ ., data = training_data, method = "nnet", maxit = 100, tuneGrid = my.grid, trace = f)
+
+#Predict using the model
+pred_nnet <- predict(mynnetfit, testing_data$delay_15)
+```
+
+
+*k-Nearest Neighbors*:
+```{r knn , eval= FALSE}
+library(caret)
+# kNN
+model_knn <- train(delay_15~., data=training_data, trControl = control, method = "knn", tuneLength = 15)
+
+#Predict using the model
+pred_knn <- predict(model.knn, testing_data$delay_15)
+```
+
+*Naive Bayes*:
+```{r bayes , eval= FALSE}
+library(e1071)
+
+# define training control
+train_control <- trainControl(method="cv", number=10)
+# fix the parameters of the algorithm
+grid <- expand.grid(.fL=c(0), .usekernel=c(FALSE))
+# train the model
+model.nb <- train(delay_15~., data = training_data, trControl=train_control, method="nb", tuneGrid=grid)
+# summarize results
+print(model)
+
+#Predict using the model
+pred_nb<-predict(model.nb,testing_data$delay_15)
+```
+
+*Classification and Regression Trees(CART)*:
+```{r cart , eval= FALSE}
+library(rpart)
+#grow the tree
+model.cart <- rpart(delay_15~., data = training_data, method="class")# Classification 
+
+printcp(fit) # display the results 
+plotcp(fit) # visualize cross-validation results 
+summary(fit) # detailed summary of splits
+
+
+#Predict using the model
+pred_cart <- predict(model.cart, testing_data$delay_15)
+```
